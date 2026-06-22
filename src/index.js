@@ -1,14 +1,13 @@
 require('dotenv').config();
 const { Telegraf, session } = require('telegraf');
-const { OpenAI } = require('openai');
+const axios = require('axios');
 
 // Initialize Telegram bot
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Get API configuration
+const API_URL = process.env.LOCAL_AI_URL || 'http://localhost:8000';
+const MODEL_NAME = process.env.AI_MODEL || 'qwen';
 
 // Store conversation history per user
 const conversationHistory = {};
@@ -16,11 +15,31 @@ const conversationHistory = {};
 // Middleware for session management
 bot.use(session());
 
+// Function to call local AI API
+async function callLocalAI(messages) {
+  try {
+    const response = await axios.post(`${API_URL}/v1/chat/completions`, {
+      model: MODEL_NAME,
+      messages: messages,
+      temperature: 0.7,
+      max_tokens: 2000,
+      stream: false,
+    }, {
+      timeout: 30000, // 30 second timeout
+    });
+
+    return response.data.choices[0].message.content;
+  } catch (error) {
+    console.error('Local AI API Error:', error.message);
+    throw error;
+  }
+}
+
 // Start command
 bot.start((ctx) => {
   ctx.reply(
-    '👋 Welcome! I\'m an AI bot powered by OpenAI.\n\n' +
-    '📝 Just send me any message and I\'ll respond using GPT!\n\n' +
+    '👋 Welcome! I\'m an AI bot powered by Local AI.\n\n' +
+    '📝 Just send me any message and I\'ll respond using ' + MODEL_NAME + '!\n\n' +
     'Commands:\n' +
     '/start - Show this welcome message\n' +
     '/clear - Clear your conversation history\n' +
@@ -44,9 +63,10 @@ bot.command('help', (ctx) => {
     '• Conversation history is maintained within your session\n' +
     '• /clear - Reset your conversation history\n' +
     '• /start - Show welcome message\n\n' +
-    '⚙️ Model: ' + (process.env.OPENAI_MODEL || 'gpt-3.5-turbo') +
+    '⚙️ Model: ' + MODEL_NAME +
+    '\n🔗 API: ' + API_URL +
     '\n\n' +
-    'Powered by OpenAI & Telegram'
+    'Powered by Local AI & Telegram'
   );
 });
 
@@ -82,15 +102,10 @@ bot.on('message', async (ctx) => {
       content: userMessage,
     });
 
-    // Call OpenAI API
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-      messages: conversationHistory[userId],
-      temperature: 0.7,
-      max_tokens: 2000,
-    });
+    console.log(`[${new Date().toISOString()}] User ${userId}: ${userMessage}`);
 
-    const aiMessage = response.choices[0].message.content;
+    // Call Local AI API
+    const aiMessage = await callLocalAI(conversationHistory[userId]);
 
     // Add AI response to history
     conversationHistory[userId].push({
@@ -98,10 +113,12 @@ bot.on('message', async (ctx) => {
       content: aiMessage,
     });
 
-    // Keep only last 20 messages to avoid token limit
+    // Keep only last 20 messages to avoid memory issues
     if (conversationHistory[userId].length > 20) {
       conversationHistory[userId] = conversationHistory[userId].slice(-20);
     }
+
+    console.log(`[${new Date().toISOString()}] AI Response: ${aiMessage.substring(0, 100)}...`);
 
     // Split long messages (Telegram limit is 4096 characters)
     if (aiMessage.length > 4096) {
@@ -115,10 +132,12 @@ bot.on('message', async (ctx) => {
   } catch (error) {
     console.error('Error:', error);
     
-    if (error.status === 401) {
-      ctx.reply('❌ Invalid OpenAI API key. Please check your configuration.');
-    } else if (error.status === 429) {
-      ctx.reply('⏳ Rate limit exceeded. Please try again later.');
+    if (error.code === 'ECONNREFUSED') {
+      ctx.reply('❌ Cannot connect to Local AI API. Is it running at ' + API_URL + '?');
+    } else if (error.message.includes('timeout')) {
+      ctx.reply('⏳ AI request timed out. Please try a shorter message.');
+    } else if (error.response?.status === 404) {
+      ctx.reply('❌ Model "' + MODEL_NAME + '" not found. Check your AI setup.');
     } else {
       ctx.reply('❌ An error occurred: ' + error.message);
     }
@@ -133,7 +152,7 @@ bot.catch((err, ctx) => {
 
 // Start bot
 if (process.env.NODE_ENV === 'production') {
-  // Webhook mode for Vercel/Railway
+  // Webhook mode for production
   const port = process.env.PORT || 3000;
   bot.launch({
     webhook: {
@@ -146,6 +165,8 @@ if (process.env.NODE_ENV === 'production') {
   // Polling mode for local development
   bot.launch();
   console.log('🚀 Bot started in polling mode');
+  console.log(`📍 Using Local AI at: ${API_URL}`);
+  console.log(`🤖 Model: ${MODEL_NAME}`);
 }
 
 // Graceful shutdown
