@@ -1,0 +1,29 @@
+{
+  "name": "telegram-openai-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot powered by OpenAI GPT-4/ChatGPT",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "openai",
+    "chatgpt"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "telegraf": "^4.12.2",
+    "openai": "^4.28.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
